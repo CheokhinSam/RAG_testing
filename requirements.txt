@@ -1,0 +1,10 @@
+langchain
+langchain-unstructured
+langchain-community
+langchain-openai
+langchain-core
+langchain-text-splitters
+psycopg2-binary
+python-dotenv
+langsmith
+typing-extensions
