@@ -1,3 +1,5 @@
+## This is the testing code for my RAG by using RAGAS evaluataion
+
 import os
 import logging
 from dotenv import load_dotenv
@@ -13,6 +15,12 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from typing_extensions import Annotated, TypedDict
 from tenacity import retry, stop_after_attempt, wait_fixed
+
+load_dotenv()
+from ragas.llms import LangchainLLMWrapper
+from ragas import evaluate
+from ragas.metrics import (faithfulness, answer_relevancy)
+from datasets import Dataset
 
 # 初始化日志記錄器
 logging.basicConfig(level=logging.INFO)
@@ -46,6 +54,12 @@ CONNECTION_STRING = (
     f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 )
 
+try:
+    client = Client()
+except Exception as e:
+    logger.error(f"Failed to initialize LangSmith client: {e}")
+    raise
+
 def get_embeddings():
     return AzureOpenAIEmbeddings(
         api_key=AZURE_OPENAI_API_KEY,
@@ -63,27 +77,44 @@ def get_llm():
         temperature=0.3
     )
 
-WORKING_DIR = 'Docs/'
-if not os.path.exists(WORKING_DIR):
-    os.makedirs(WORKING_DIR)
+###############################################################################################################################################################################
 
-all_chunked_docs = []
-for file_path in file_paths:
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"File not found: {file_path}")
-    loader = UnstructuredLoader(file_path)
-    documents = loader.load()
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        add_start_index=True
-    )
-    chunked_docs = text_splitter.split_documents(documents)
-    all_chunked_docs.extend(chunked_docs)
+def evaluation(datasamples, llm, embeddings, metrics, verbose=True):
+    try: custom_dataset = Dataset.from_dict(datasamples)
+    except Exception as e:
+        logger.error(f"Failed to create dataset: {e}")
+        raise
 
-vector_store = PGVector(
-            embedding=get_embeddings(),
-            documents=all_chunked_docs,
-            collection_name=collection_name,
-            connection_string=CONNECTION_STRING,
-            pre_delete_collection=False
+    ragas_llm = LangchainLLMWrapper(llm)
+
+    try:
+        result = evaluate(custom_dataset, metrics=metrics, llm=ragas_llm, embeddings=embeddings)
+    except Exception as e:
+        logger.error(f"Evaluation failed: {e}")
+        raise
+
+    df = result.to_pandas()
+    if verbose:
+        print("\nEvaluation result：")
+        print(df)
+
+    return df
+
+if __name__ == "__main__":
+
+
+    data_samples = {
+        'question': ['When was the first super bowl?', 'Who won the most super bowls?'],
+        'answer': ['The first superbowl was held on Jan 15, 1967', 'The most super bowls have been won by The New England Patriots'],
+        'contexts' : [['The First AFL–NFL World Championship Game was an American football game played on January 15, 1967, at the Los Angeles Memorial Coliseum in Los Angeles,'],
+        ['The Green Bay Packers...Green Bay, Wisconsin.','The Packers compete...Football Conference']],
+    }
+    
+    llm = get_llm()
+    embeddings = get_embeddings()
+    metrics = [faithfulness, answer_relevancy]
+    result_df = evaluation(data_samples, llm, embeddings, metrics, verbose=True)
+
+
+
+
